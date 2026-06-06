@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Toxic Comment Classification</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700;900&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Cinzel:wght@400;600&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:      #06061a;
+      --deep:      #0b0b24;
+      --card-bg:   rgba(255, 255, 255, 0.035);
+      --border:    rgba(212, 175, 55, 0.22);
+      --gold:      #d4af37;
+      --gold-lt:   #f5e27a;
+      --gold-dk:   #a07c1a;
+      --toxic:     #e03535;
+      --toxic-glow:rgba(224, 53, 53, 0.22);
+      --safe:      #00c97a;
+      --safe-glow: rgba(0, 201, 122, 0.18);
+      --text:      #ede6d0;
+      --muted:     rgba(237, 230, 208, 0.5);
+    }
+
+    html, body {
+      min-height: 100vh;
+      background: var(--navy);
+      color: var(--text);
+      overflow-x: hidden;
+    }
+
+    /* ── Canvas particles ── */
+    #canvas {
+      position: fixed; inset: 0; z-index: 0;
+      pointer-events: none;
+    }
+
+    /* ── Atmospheric glow layers ── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background:
+        radial-gradient(ellipse 65% 55% at 15% 5%,  rgba(80, 40, 120, 0.45) 0%, transparent 65%),
+        radial-gradient(ellipse 55% 45% at 85% 95%, rgba(60, 20, 100, 0.3)  0%, transparent 60%),
+        radial-gradient(ellipse 40% 30% at 50% 50%, rgba(212,175,55,0.04)   0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    /* ── Page wrapper ── */
+    .page {
+      position: relative; z-index: 1;
+      min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center;
+      padding: 28px 20px 30px;
+    }
+
+    /* ── Ornament top line ── */
+    .ornament {
+      display: flex; align-items: center; gap: 16px;
+      margin-bottom: 14px;
+      opacity: 0;
+      animation: fadeIn 1s 0.1s ease forwards;
+    }
+    .ornament-line {
+      width: 80px; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold));
+    }
+    .ornament-line.right {
+      background: linear-gradient(90deg, var(--gold), transparent);
+    }
+    .ornament-diamond {
+      width: 8px; height: 8px;
+      background: var(--gold);
+      transform: rotate(45deg);
+      box-shadow: 0 0 12px var(--gold);
+    }
+
+    /* ── Crown SVG ── */
+    .crown {
+      margin-bottom: 10px;
+      animation: floatCrown 5s ease-in-out infinite, fadeIn 1s 0.2s ease both;
+      filter: drop-shadow(0 0 20px rgba(212,175,55,0.6));
+    }
+
+    @keyframes floatCrown {
+      0%,100% { transform: translateY(0px) rotate(-1deg); }
+      50%      { transform: translateY(-12px) rotate(1deg); }
+    }
+
+    /* ── Heading ── */
+    .heading {
+      font-family: 'Cinzel Decorative', cursive;
+      font-size: clamp(1.6rem, 5vw, 3.2rem);
+      font-weight: 900;
+      text-align: center;
+      letter-spacing: 0.04em;
+      line-height: 1.2;
+      background: linear-gradient(135deg, var(--gold-lt) 0%, var(--gold) 45%, var(--gold-dk) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+      opacity: 0;
+      animation: slideDown 0.9s 0.3s cubic-bezier(0.22,1,0.36,1) forwards;
+    }
+
+    @keyframes slideDown {
+      from { opacity:0; transform: translateY(-30px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+
+    /* ── Gold rule ── */
+    .rule {
+      width: 0; height: 1.5px; margin: 18px auto 0;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+      animation: expandRule 1.2s 0.6s ease forwards;
+    }
+    @keyframes expandRule { to { width: min(480px, 78vw); } }
+
+    /* ── Subtitle ── */
+    .subtitle {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(0.95rem, 2vw, 1.15rem); font-style: italic;
+      color: rgba(212,175,55,0.65);
+      margin-top: 12px; text-align: center;
+      letter-spacing: 0.05em;
+      opacity: 0;
+      animation: fadeIn 1s 0.8s ease forwards;
+    }
+
+    @keyframes fadeIn { to { opacity: 1; } }
+
+    /* ── Main glass card ── */
+    .card {
+      margin-top: 20px;
+      width: min(680px, 94vw);
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 24px 32px 28px;
+      backdrop-filter: blur(20px);
+      box-shadow:
+        0 0 0 1px rgba(212,175,55,0.06),
+        0 10px 60px rgba(0,0,0,0.6),
+        inset 0 1px 0 rgba(255,255,255,0.05);
+      opacity: 0;
+      animation: riseUp 1s 0.9s cubic-bezier(0.22,1,0.36,1) forwards;
+      position: relative; overflow: hidden;
+    }
+    .card::before {
+      content: '';
+      position: absolute; top: -1px; left: 8%; right: 8%; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    }
+
+    @keyframes riseUp {
+      from { opacity:0; transform: translateY(36px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+
+    /* ── Label ── */
+    .input-label {
+      font-family: 'Cinzel', serif;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 14px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .label-gem {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--gold);
+      box-shadow: 0 0 8px var(--gold), 0 0 16px rgba(212,175,55,0.4);
+    }
+
+    /* ── Textarea ── */
+    .comment-box {
+      width: 100%;
+      min-height: 90px;
+      background: rgba(255,255,255,0.025);
+      border: 1.5px solid rgba(212,175,55,0.25);
+      border-radius: 14px;
+      padding: 18px 20px;
+      color: var(--text);
+      font-family: 'Times New Roman', Times, serif;
+      font-size: 1.15rem;
+      line-height: 1.75;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.3s, box-shadow 0.3s, background 0.3s;
+      caret-color: var(--gold);
+    }
+    .comment-box::placeholder {
+      color: rgba(212,175,55,0.28);
+      font-family: 'Times New Roman', Times, serif;
+      font-size: 1.15rem;
+    }
+    .comment-box:focus {
+      border-color: rgba(212,175,55,0.65);
+      background: rgba(255,255,255,0.04);
+      box-shadow: 0 0 0 3px rgba(212,175,55,0.07), 0 0 28px rgba(212,175,55,0.1);
+    }
+    .comment-box.error {
+      border-color: rgba(224,53,53,0.6) !important;
+      box-shadow: 0 0 0 3px rgba(224,53,53,0.08) !important;
+    }
+
+    /* ── Button ── */
+    .btn-row { margin-top: 16px; display: flex; justify-content: center; }
+
+    .detect-btn {
+      position: relative; overflow: hidden;
+      font-family: 'Playfair Display', serif;
+      font-size: 1.1rem;
+      letter-spacing: 0.05em;
+      color: #1a1000;
+      background: linear-gradient(135deg, var(--gold-lt) 0%, var(--gold) 55%, var(--gold-dk) 100%);
+      border: none; border-radius: 50px;
+      padding: 13px 62px;
+      cursor: pointer;
+      box-shadow:
+        0 4px 28px rgba(212,175,55,0.38),
+        inset 0 1px 0 rgba(255,255,255,0.25);
+      transition: transform 0.18s, box-shadow 0.18s;
+    }
+    .detect-btn::after {
+      content: '';
+      position: absolute; top: -50%; left: -60%;
+      width: 38%; height: 200%;
+      background: rgba(255,255,255,0.22);
+      transform: skewX(-22deg);
+      transition: left 0.55s ease;
+    }
+    .detect-btn:hover::after { left: 130%; }
+    .detect-btn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 10px 40px rgba(212,175,55,0.5), inset 0 1px 0 rgba(255,255,255,0.25);
+    }
+    .detect-btn:active  { transform: translateY(1px); }
+    .detect-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+    /* ── Spinner inside button ── */
+    .btn-inner { display: flex; align-items: center; justify-content: center; gap: 10px; }
+    .spinner {
+      display: none;
+      width: 20px; height: 20px;
+      border: 2.5px solid rgba(26,16,0,0.25);
+      border-top-color: #1a1000;
+      border-radius: 50%;
+      animation: spin 0.65s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Result card ── */
+    .result {
+      margin-top: 16px;
+      border-radius: 16px;
+      padding: 30px 28px;
+      text-align: center;
+      border: 1.5px solid transparent;
+      opacity: 0; transform: translateY(18px) scale(0.97);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+      pointer-events: none;
+    }
+    .result.show {
+      opacity: 1; transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+    .result.toxic {
+      background: rgba(224,53,53,0.07);
+      border-color: rgba(224,53,53,0.38);
+      box-shadow: 0 0 44px var(--toxic-glow), inset 0 1px 0 rgba(224,53,53,0.08);
+    }
+    .result.safe {
+      background: rgba(0,201,122,0.06);
+      border-color: rgba(0,201,122,0.32);
+      box-shadow: 0 0 40px var(--safe-glow), inset 0 1px 0 rgba(0,201,122,0.07);
+    }
+
+    .result-icon {
+      font-size: 2.8rem; margin-bottom: 8px;
+      animation: popIn 0.4s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    @keyframes popIn { from{transform:scale(0.3) rotate(-10deg)} to{transform:scale(1) rotate(0deg)} }
+
+    .result-label {
+      font-family: 'Cinzel Decorative', cursive;
+      font-size: clamp(1.5rem, 4vw, 2.2rem);
+      font-weight: 900;
+      letter-spacing: 0.1em;
+    }
+    .result.toxic .result-label { color: var(--toxic); text-shadow: 0 0 24px rgba(224,53,53,0.5); }
+    .result.safe  .result-label { color: var(--safe);  text-shadow: 0 0 22px rgba(0,201,122,0.45); }
+
+    .result-desc {
+      font-family: 'Playfair Display', serif;
+      
+      margin-top: 7px; opacity: 0.72;
+    }
+    .result.toxic .result-desc { color: #ffb3b3; }
+    .result.safe  .result-desc { color: #9dffd4; }
+
+    /* Confidence bar */
+    .conf-track {
+      margin-top: 18px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 50px; height: 7px; overflow: hidden;
+    }
+    .conf-fill {
+      height: 100%; width: 0; border-radius: 50px;
+      transition: width 1s cubic-bezier(0.22,1,0.36,1);
+    }
+    .result.toxic .conf-fill { background: linear-gradient(90deg,#c02020,#ff6060); }
+    .result.safe  .conf-fill { background: linear-gradient(90deg,#00a060,#00e68a); }
+
+    .conf-text {
+      font-family: 'Cinzel', serif;
+      font-size: 0.75rem; letter-spacing: 0.12em;
+      margin-top: 8px; opacity: 0.5; text-transform: uppercase;
+    }
+
+    /* ── Error message ── */
+    .err-msg {
+      font-family: 'Playfair Display', serif;
+      font-size: 0.9rem;
+      color: rgba(224,53,53,0.8);
+      text-align: center;
+      margin-top: 10px;
+      min-height: 1.8rem;
+    }
+
+    /* ── Stats row ── */
+    .stats {
+      margin-top: 18px;
+      width: min(680px, 94vw);
+      display: grid; grid-template-columns: repeat(3,1fr); gap: 14px;
+      opacity: 0;
+      animation: fadeIn 1s 1.2s ease forwards;
+    }
+    .stat {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 12px 14px; text-align: center;
+      backdrop-filter: blur(12px);
+      transition: transform 0.22s, box-shadow 0.22s;
+    }
+    .stat:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 30px rgba(212,175,55,0.1);
+    }
+    .stat-num {
+      font-family: 'Cinzel Decorative', cursive;
+      font-size: 1.5rem; font-weight: 900;
+      color: var(--gold); display: block;
+    }
+    .stat-lbl {
+      font-family: 'Playfair Display', serif;
+      font-size: 0.9rem; color: var(--muted);
+      margin-top: 4px; display: block;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      margin-top: 20px; text-align: center;
+      opacity: 0;
+      animation: fadeIn 1s 1.4s ease forwards;
+    }
+    .footer-rule {
+      width: 100px; height: 1px; margin: 0 auto 14px;
+      background: linear-gradient(90deg,transparent,var(--gold),transparent);
+    }
+    .footer-text {
+      font-family: 'Playfair Display', serif;
+      font-size: 0.88rem; color: rgba(212,175,55,0.35);
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 500px) {
+      .card { padding: 26px 18px 30px; }
+      .stats { grid-template-columns: 1fr; }
+      .detect-btn { font-size: 1.55rem; padding: 12px 44px; }
+      .heading { font-size: 1.35rem; }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<div class="page">
+
+  <!-- Top ornament -->
+  <div class="ornament">
+    <div class="ornament-line"></div>
+    <div class="ornament-diamond"></div>
+    <div class="ornament-line right"></div>
+  </div>
+
+  <!-- Crown -->
+  <div class="crown">
+    <svg width="70" height="50" viewBox="0 0 70 50" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <polygon points="35,3 57,24 67,7 60,46 10,46 3,7 13,24"
+               fill="none" stroke="#d4af37" stroke-width="2"
+               stroke-linejoin="round"/>
+      <circle cx="35" cy="3"  r="4"   fill="#d4af37"/>
+      <circle cx="67" cy="7"  r="3.2" fill="#d4af37"/>
+      <circle cx="3"  cy="7"  r="3.2" fill="#d4af37"/>
+      <line x1="10" y1="46" x2="60" y2="46" stroke="#d4af37" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="22" cy="36" r="2.8" fill="rgba(212,175,55,0.55)"/>
+      <circle cx="35" cy="31" r="3.5" fill="rgba(212,175,55,0.75)"/>
+      <circle cx="48" cy="36" r="2.8" fill="rgba(212,175,55,0.55)"/>
+    </svg>
+  </div>
+
+  <!-- Heading -->
+  <h1 class="heading">Toxic Comment<br/>Classification</h1>
+  <div class="rule"></div>
+  <p class="subtitle">Unveil the nature of every word</p>
+
+  <!-- Main card -->
+  <div class="card">
+
+    <div class="input-label">
+      <span class="label-gem"></span>
+      Enter Your Comment
+    </div>
+
+    <textarea
+      id="commentInput"
+      class="comment-box"
+      placeholder="Write your comment here..."
+      rows="5"
+    ></textarea>
+
+    <div class="err-msg" id="errMsg"></div>
+
+    <div class="btn-row">
+      <button class="detect-btn" id="detectBtn" onclick="analyze()">
+        <div class="btn-inner">
+          <span id="btnText">Detect</span>
+          <div class="spinner" id="spinner"></div>
+        </div>
+      </button>
+    </div>
+
+    <!-- Result -->
+    <div class="result" id="resultCard">
+      <div class="result-icon"  id="resultIcon"></div>
+      <div class="result-label" id="resultLabel"></div>
+      <div class="result-desc"  id="resultDesc"></div>
+      <div class="conf-track">
+        <div class="conf-fill" id="confFill"></div>
+      </div>
+      <div class="conf-text" id="confText"></div>
+    </div>
+
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat">
+      <span class="stat-num" id="totalCount">0</span>
+      <span class="stat-lbl">Total Analyzed</span>
+    </div>
+    <div class="stat">
+      <span class="stat-num" id="toxicCount" style="color:#e03535">0</span>
+      <span class="stat-lbl">Toxic Detected</span>
+    </div>
+    <div class="stat">
+      <span class="stat-num" id="safeCount" style="color:#00c97a">0</span>
+      <span class="stat-lbl">Non-Toxic Detected</span>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-rule"></div>
+    <p class="footer-text">Powered by Bidirectional LSTM &amp; Deep Learning</p>
+  </div>
+
+</div>
+
+<script>
+  /* ── Counters ── */
+  let total = 0, toxicC = 0, safeC = 0;
+
+  /* ── Main analyze function — calls Flask /predict ── */
+  async function analyze() {
+    const input  = document.getElementById('commentInput');
+    const errMsg = document.getElementById('errMsg');
+    const comment = input.value.trim();
+
+    errMsg.textContent = '';
+    input.classList.remove('error');
+
+    if (!comment) {
+      input.classList.add('error');
+      errMsg.textContent = 'Please enter a comment before detecting...';
+      input.focus();
+      setTimeout(() => { input.classList.remove('error'); errMsg.textContent=''; }, 2500);
+      return;
+    }
+
+    /* Loading state */
+    const btn     = document.getElementById('detectBtn');
+    const btnText = document.getElementById('btnText');
+    const spinner = document.getElementById('spinner');
+    btn.disabled = true;
+    btnText.style.display = 'none';
+    spinner.style.display = 'block';
+
+    try {
+      /* ── Real Flask API call ── */
+      const response = await fetch('/predict', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ comment: comment })
+      });
+
+      if (!response.ok) {
+        throw new Error('Server error: ' + response.status);
+      }
+
+      const data = await response.json();
+
+      /* ── Show result ── */
+      showResult(data.label, data.confidence);
+
+    } catch (err) {
+      errMsg.textContent = 'Connection error. Make sure Flask server is running.';
+      console.error(err);
+    }
+
+    /* Reset button */
+    btn.disabled = false;
+    btnText.style.display = 'inline';
+    spinner.style.display = 'none';
+  }
+
+  /* ── Render result card ── */
+  function showResult(label, confidence) {
+    const card  = document.getElementById('resultCard');
+    const icon  = document.getElementById('resultIcon');
+    const lbl   = document.getElementById('resultLabel');
+    const desc  = document.getElementById('resultDesc');
+    const fill  = document.getElementById('confFill');
+    const conf  = document.getElementById('confText');
+
+    const isToxic = label === 'TOXIC';
+
+    card.className  = 'result ' + (isToxic ? 'toxic' : 'safe');
+    icon.textContent = isToxic ? '☠️' : '✅';
+    lbl.textContent  = label;
+    desc.textContent = isToxic
+      ? 'This comment contains harmful content'
+      : 'This comment appears to be clean';
+    conf.textContent = `Confidence: ${confidence}%`;
+
+    /* Trigger animation */
+    card.classList.remove('show');
+    void card.offsetWidth;
+    card.classList.add('show');
+
+    fill.style.width = '0%';
+    setTimeout(() => { fill.style.width = confidence + '%'; }, 120);
+
+    /* Update counters */
+    total++;
+    if (isToxic) toxicC++; else safeC++;
+    animateCount('totalCount', total);
+    animateCount('toxicCount', toxicC);
+    animateCount('safeCount',  safeC);
+  }
+
+  /* ── Animate counter numbers ── */
+  function animateCount(id, target) {
+    const el = document.getElementById(id);
+    let cur  = parseInt(el.textContent) || 0;
+    const tick = () => {
+      if (cur < target) { el.textContent = ++cur; requestAnimationFrame(tick); }
+    };
+    requestAnimationFrame(tick);
+  }
+
+  /* ── Enter key support ── */
+  document.getElementById('commentInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); analyze(); }
+  });
+
+  /* ── Particle system ── */
+  (function () {
+    const canvas = document.getElementById('canvas');
+    const ctx    = canvas.getContext('2d');
+    let W, H, pts = [];
+
+    function resize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    for (let i = 0; i < 65; i++) {
+      pts.push({
+        x: Math.random() * 1800,
+        y: Math.random() * 1800,
+        r: Math.random() * 1.5 + 0.4,
+        a: Math.random() * Math.PI * 2,
+        s: Math.random() * 0.28 + 0.06,
+        o: Math.random() * 0.45 + 0.1
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      pts.forEach(p => {
+        p.y -= p.s;
+        p.x += Math.sin(p.a) * 0.28;
+        p.a += 0.007;
+        if (p.y < -8) { p.y = H + 8; p.x = Math.random() * W; }
+        ctx.beginPath();
+        ctx.arc(p.x % W, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(212,175,55,${p.o})`;
+        ctx.fill();
+      });
+      requestAnimationFrame(draw);
+    }
+    draw();
+  })();
+</script>
+</body>
+</html>
