@@ -121,27 +121,30 @@ def predict():
     Receive comment from frontend via POST request,
     run prediction and return JSON result.
     """
-    data    = request.get_json()
-    comment = data.get('comment', '').strip()
+    try:
+        data    = request.get_json()
+        comment = data.get('comment', '').strip()
 
-    if not comment:
-        return jsonify({'error': 'No comment provided'}), 400
+        if not comment:
+            return jsonify({'error': 'No comment provided'}), 400
 
-    label, confidence = predict_comment(comment)
+        label, confidence = predict_comment(comment)
 
-    return jsonify({
-        'label'     : label,
-        'confidence': confidence,
-        'comment'   : comment
-    })
+        return jsonify({
+            'label'     : label,
+            'confidence': confidence,
+            'comment'   : comment
+        })
+
+    except Exception as e:
+        print(f"Prediction error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 
 # ============================================================
 #   RUN SERVER
 # ============================================================
 if __name__ == '__main__':
-    print("\n🚀 Flask server starting...")
-    print("   Open your browser and go to: http://localhost:5000")
-    print("   Press CTRL+C to stop the server\n")
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 10000))
+    print(f"\n🚀 Flask server starting on port {port}...")
     app.run(debug=False, host='0.0.0.0', port=port)
