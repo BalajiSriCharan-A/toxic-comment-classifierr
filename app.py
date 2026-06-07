@@ -1,6 +1,5 @@
 # ============================================================
 #   Toxic Comment Classification - Flask Backend
-#   Connects the LSTM model to the royal frontend
 # ============================================================
 
 from flask import Flask, request, jsonify, render_template
@@ -8,13 +7,18 @@ import pickle
 import numpy as np
 import re
 import os
-
-import tensorflow as tf
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-
 import warnings
 warnings.filterwarnings('ignore')
+
+# ============================================================
+#   FLASK APP INIT FIRST — before loading model
+#   This ensures port opens immediately for Render
+# ============================================================
+app = Flask(__name__)
+
+# Global variables for lazy loading
+model     = None
+tokenizer = None
 
 # ============================================================
 #   CONFIGURATION
@@ -38,29 +42,18 @@ STRONG_TOXIC_WORDS = [
 ]
 
 # ============================================================
-#   FLASK APP INIT
+#   LAZY MODEL LOADER — loads only when first request comes
 # ============================================================
-app = Flask(__name__)
-
-# ── Load model & tokenizer once at startup ───────────────────
-print("⏳ Loading model and tokenizer...")
-
-if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError(
-        f"❌ Model not found at '{MODEL_PATH}'. "
-        "Please run toxic_detector.py first."
-    )
-if not os.path.exists(TOKENIZER_PATH):
-    raise FileNotFoundError(
-        f"❌ Tokenizer not found at '{TOKENIZER_PATH}'. "
-        "Please run toxic_detector.py first."
-    )
-
-model = load_model(MODEL_PATH)
-with open(TOKENIZER_PATH, 'rb') as f:
-    tokenizer = pickle.load(f)
-
-print("✅ Model and tokenizer loaded successfully!")
+def load_model_once():
+    global model, tokenizer
+    if model is None or tokenizer is None:
+        print("⏳ Loading model and tokenizer...")
+        import tensorflow as tf
+        from tensorflow.keras.models import load_model
+        model = load_model(MODEL_PATH)
+        with open(TOKENIZER_PATH, 'rb') as f:
+            tokenizer = pickle.load(f)
+        print("✅ Model and tokenizer loaded!")
 
 # ============================================================
 #   HELPER FUNCTIONS
@@ -88,6 +81,7 @@ def has_negation_before_toxic_word(text):
 
 
 def predict_comment(comment):
+    from tensorflow.keras.preprocessing.sequence import pad_sequences
     cleaned  = clean_text(comment)
     sequence = tokenizer.texts_to_sequences([cleaned])
     padded   = pad_sequences(sequence, maxlen=MAX_SEQ_LENGTH,
@@ -111,17 +105,13 @@ def predict_comment(comment):
 # ============================================================
 @app.route('/')
 def index():
-    """Serve the royal frontend page."""
     return render_template('index.html')
 
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    """
-    Receive comment from frontend via POST request,
-    run prediction and return JSON result.
-    """
     try:
+        load_model_once()
         data    = request.get_json()
         comment = data.get('comment', '').strip()
 
@@ -146,5 +136,5 @@ def predict():
 # ============================================================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
-    print(f"\n🚀 Flask server starting on port {port}...")
+    print(f"🚀 Starting server on port {port}...")
     app.run(debug=False, host='0.0.0.0', port=port)
